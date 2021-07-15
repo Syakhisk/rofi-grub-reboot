@@ -1,0 +1,116 @@
+#!/bin/env node
+
+"use strict";
+const util = require("util");
+const exec = util.promisify(require("child_process").exec);
+
+(async () => {
+  /*
+   * Explaination
+   * Bash script:
+   * sudo awk -F \- /^menuentry/{print\$1} /boot/grub/grub.cfg
+   *
+   * -F is field separator, we will separate the line (into columns)
+   *  when the '-' is found
+   *  ex (when printing 2nd column '{print $2}'):
+   *  ```
+   *  m42nk - gemink
+   *  btw - i use arch
+   *  ketawa - lol
+   *  ```
+   *
+   *  will be:
+   *  ```
+   *  gemink
+   *  i use arch
+   *  lol
+   *  ```
+   *
+   * /^menuentry means that find the line with 'menuentry'
+   * as the start of the line (regex)
+   *
+   * when using regex, put the print command right after the
+   * regex ending ('/')
+   *
+   * last argument is the name of the file
+   *
+   * Cut comand:
+   * cut -d '"' -f2
+   *
+   * -d is the delimiter, we use the double-quote sign ('"')
+   * -f2 means print the second column of that splitted line
+   *  ex:
+   *  ```
+   *  my name is "pakde" just kidding
+   *  ```
+   *
+   *  will be:
+   *  ```
+   *  my name is
+   *  pakde
+   *  just kidding
+   *  ```
+   *
+   */
+
+  // rofi Scripts
+  const rofi_menu = 'rofi -dmenu -format i:s -p "Reboot to"';
+  const rofi_confirm = (os_label) =>
+    `rofi -dmenu -no-fixed-num-lines -p "Reboot to ${os_label}? (Y/n)" &`;
+  const rofi_cancel = 'rofi -e "Operation cancelled."';
+  const rofi_invalid = 'rofi -e "Invalid input, available options: Y/n"';
+
+  // get all grub menuentry
+  const { stdout: rawMenuEntry } = await exec(
+    "sudo awk -F \\- /^menuentry/{print\\ \\$1} /boot/grub/grub.cfg | cut -d '\"' -f2"
+  );
+
+  // // split output by newline
+  // const menuentry = rawMenuEntry.split("\n");
+
+  // // remove trailing empty array element
+  // menuentry.pop();
+
+  // //join menuentry
+  // const cleaned = menuentry.join("\n");
+
+  const cleaned = rawMenuEntry.slice(0, -1);
+
+  const choosen_os_raw = await exec(`echo "${cleaned}" | ${rofi_menu}`).catch(
+    (err) => console.log("Exited: \n" + err)
+  );
+
+  // stop if error
+  if (!choosen_os_raw) return;
+
+  // remove trailing newline
+  const chosen = choosen_os_raw.stdout.replace("\n", "");
+
+  // destructure result from <bootnum>:<label>
+  const [bootnum, label] = chosen.split(":");
+  console.log("choosen " + chosen);
+
+  const confirm_raw = await exec(rofi_confirm(label));
+
+  // stop if error
+  if (!confirm_raw) return;
+
+  const confirm = confirm_raw.stdout;
+
+  // available confirm answer
+  const yes_ans = ["\n", "y\n", "yes\n"];
+  const no_ans = ["n\n", "no\n"];
+
+  if (yes_ans.includes(confirm.toLowerCase())) {
+    console.log("yes");
+    await exec(`sudo grub-reboot ${bootnum} && sudo reboot`);
+  } else if (no_ans.includes(confirm.toLowerCase())) {
+    console.log("no");
+    await exec(rofi_cancel);
+  } else {
+    console.log("invalid input");
+    await exec(rofi_invalid);
+  }
+
+  console.log({ confirm });
+})();
